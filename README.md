@@ -8,24 +8,28 @@ OJET-GPT is an AI Assistant to help developers write code using Oracle JET and R
 
 ## LLM details
 
+```bash
 Model: Deepseek Coder V2
 Model size: 8.9GB
 Number of parameters: 15.7B
 Training data: Stack Overflow, GitHub, Oracle JET documentation, Redwood documentation
+```
 
 ### How to run the model
 
 Download & install Ollama in your system
 https://ollama.com/download
 
+```bash
 Ollama pull deepseek-coder-v2
 Ollama run deepseek-coder-v2
 Listen to localhost:11434
+```
 
 ## Database
 
-PostgreSQL 14.0
-Planning to use pgVector for vector search and embeddings
+Qdrant
+https://qdrant.tech/
 
 ## API
 

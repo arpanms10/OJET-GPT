@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OJET GPT</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+    />
+
     <style>
       .message-content {
         white-space: pre-wrap;
@@ -27,15 +32,23 @@
         <div id="chat-messages" class="space-y-4"></div>
       </div>
       <form id="chatForm" class="mb-4 flex items-center">
-        <label for="prompt" class="block mb-2"></label>
-        <input
-          type="text"
-          id="prompt"
-          name="prompt"
-          required
-          class="border p-2 w-full"
-          placeholder="Type a message..."
-        />
+        <div class="relative w-full">
+          <label for="prompt" class="block mb-2"></label>
+          <input
+            type="text"
+            id="prompt"
+            name="prompt"
+            required
+            class="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500"
+            placeholder="Type a message..."
+          />
+          <label for="pdfInput" class="absolute right-2 top-2 cursor-pointer">
+            <i
+              class="fas fa-paperclip text-gray-500 hover:text-blue-500 text-xl"
+            ></i>
+          </label>
+          <input type="file" id="pdfInput" accept=".pdf" class="hidden" />
+        </div>
         <button
           type="submit"
           class="bg-blue-500 text-white p-2 ml-2 rounded-lg"
@@ -92,20 +105,68 @@
         }
       };
 
+      document
+        .getElementById("pdfInput")
+        .addEventListener("change", async function (event) {
+          const file = event.target.files[0]; // Get selected file
+          if (!file) return; // No file selected
+
+          const formData = new FormData();
+          formData.append("file", file);
+
+          try {
+            const response = await fetch("/file-upload", {
+              method: "POST",
+              body: formData
+            });
+
+            if (!response.ok) throw new Error("Upload failed");
+
+            console.log("File uploaded successfully!\n", response);
+          } catch (error) {
+            console.error("File upload error:", error);
+          }
+        });
+
       function addMessageToChat(sender, content) {
         const messageElement = document.createElement("div");
-        messageElement.className = `p-3 rounded-lg ${
-          sender === "User" ? "bg-blue-100" : "bg-green-100"
+
+        // Check if sender is User or Bot
+        const isUser = sender === "User";
+
+        // Create message content
+        messageElement.className = `p-3 rounded-lg max-w-[60%] ${
+          isUser
+            ? "bg-blue-100 self-end text-right"
+            : "bg-green-100 self-start text-left"
+        }`;
+        messageElement.innerHTML = `<div class="message-content">${content}</div>`;
+
+        // Create wrapper for message with flex alignment
+        const messageWrapper = document.createElement("div");
+        messageWrapper.className = `flex w-full items-center gap-2 ${
+          isUser ? "justify-end" : "justify-start"
         }`;
 
-        messageElement.innerHTML = `
-          <div class="font-bold ${
-            sender === "User" ? "text-blue-600" : "text-green-600"
-          }">${sender}:</div>
-          <div class="message-content">${content}</div>
-        `;
+        // If sender is the bot, add the Font Awesome robot icon
+        if (!isUser) {
+          const botIcon = document.createElement("i");
+          botIcon.className =
+            "fa-duotone fa-solid fa-robot text-green-600 text-2xl"; // Font Awesome robot icon
+          messageWrapper.appendChild(botIcon);
+        }
 
-        chatMessages.appendChild(messageElement);
+        messageWrapper.appendChild(messageElement);
+
+        // If sender is the user, add an optional user icon
+        if (isUser) {
+          const userIcon = document.createElement("i");
+          userIcon.className =
+            "fa-duotone fa-solid fa-user text-blue-600 text-2xl"; // Font Awesome user icon
+          messageWrapper.appendChild(userIcon);
+        }
+
+        chatMessages.appendChild(messageWrapper);
         scrollToBottom();
 
         return messageElement;
