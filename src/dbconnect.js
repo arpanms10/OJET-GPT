@@ -9,7 +9,8 @@ const client = new QdrantClient({
   apiKey: process.env.QDRANT_API_KEY,
   checkCompatibility: false
 });
-const COLLECTION_NAME = "data_history";
+const TEXT_COLLECTION = "data_history";
+const CODE_COLLECTION = "code_snippets";
 
 function generateId() {
   return uuidv4();
@@ -23,7 +24,7 @@ async function storeEmbeddings(response, text) {
     points: [{ id: id, vector: response, payload: { text: text } }]
   };
   client
-    .upsert(COLLECTION_NAME, pointObj)
+    .upsert(TEXT_COLLECTION, pointObj)
     .then(() => {
       console.log("Chat history stored successfully.");
     })
@@ -34,14 +35,22 @@ async function storeEmbeddings(response, text) {
 
 async function searchEmbeddings(queryVector, limit = 500) {
   try {
-    console.log("Searching embeddings in Qdrant...");
-    console.log(queryVector);
-    return await client.search(COLLECTION_NAME, {
-      vector: queryVector,
-      limit,
-      with_vector: true,
-      score_threshold: 0.7
-    });
+    const [textResults, codeResults] = await Promise.all([
+      client.search(TEXT_COLLECTION, {
+        vector: queryVector,
+        limit,
+        with_vector: true,
+        score_threshold: 0.7
+      }),
+      client.search(CODE_COLLECTION, {
+        vector: queryVector,
+        limit,
+        with_vector: true,
+        score_threshold: 0.7
+      })
+    ]);
+
+    return { textResults, codeResults };
   } catch (error) {
     console.error("Error searching embeddings in Qdrant:", error);
     throw new Error("Failed to search embeddings.");
@@ -54,25 +63,50 @@ async function storeChunksInQdrant(chunks, fileId) {
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
-    console.log(chunk);
-    const decodedText = decoder.decode(chunk);
-    const vector = await generateEmbeddings(decodedText); // Get embedding
+    const isCodeBlock = chunk.trim().startsWith("```");
 
+    const vector = await generateEmbeddings(chunk);
     points.push({
       id: generateId(),
       vector,
       payload: {
         fileId,
         chunkIndex: i,
-        text: decodedText
+        text: isCodeBlock ? chunk : decoder.decode(chunk),
+        type: isCodeBlock ? "code" : "text"
       }
     });
   }
 
   // Upsert to Qdrant
-  await client.upsert(COLLECTION_NAME, { points });
+  await client.upsert(TEXT_COLLECTION, { points });
 
   console.log(`✅ Stored ${chunks.length} chunks in Qdrant.`);
 }
 
-module.exports = { storeEmbeddings, searchEmbeddings, storeChunksInQdrant };
+async function storeCodeSnippets(code, metadata = {}) {
+  try {
+    const embedding = await generateEmbeddings(code);
+    const point = {
+      id: generateId(),
+      vector: embedding,
+      payload: {
+        text: code,
+        ...metadata,
+        type: "code"
+      }
+    };
+    await client.upsert("code_snippets", { points: [point] });
+    console.log("✅ Code snippet stored successfully:", point.id);
+    return point;
+  } catch (error) {
+    console.error("❌ Error storing code snippet:", error.message);
+  }
+}
+
+module.exports = {
+  storeEmbeddings,
+  searchEmbeddings,
+  storeChunksInQdrant,
+  storeCodeSnippets
+};

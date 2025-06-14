@@ -10,7 +10,8 @@ const {
 const {
   storeEmbeddings,
   searchEmbeddings,
-  storeChunksInQdrant
+  storeChunksInQdrant,
+  storeCodeSnippets
 } = require("./src/dbconnect");
 const { generateEmbeddings } = require("./src/embeddings");
 // const deepseekSearch = require("./src/modelHandler");
@@ -61,13 +62,15 @@ app.post("/chat", async (req, res) => {
       res.write("💡 Processing user query...\n");
       const queryVector = await generateEmbeddings(prompt);
       console.log(queryVector, "queryVector");
-      const searchResults = await searchEmbeddings(queryVector);
-      console.log(searchResults.length, "searchResults");
+      const { codeResults, textResults } = await searchEmbeddings(queryVector);
+      console.log(codeResults.length, "codeResults");
+      console.log(textResults.length, "textResults");
 
       res.write("🔍 Searching relevant information...\n");
       for await (const chunk of generateReadableResponse(
         prompt,
-        searchResults
+        codeResults,
+        textResults
       )) {
         res.write(chunk);
       }
@@ -150,10 +153,15 @@ app.post("/search", async (req, res) => {
     const queryEmbedding = embedResponse.data.embedding;
 
     // Search for similar embeddings
-    const searchResults = await searchEmbeddings(queryEmbedding);
-    const context = searchResults
-      ?.map((result, index) => `(${index + 1}) ${result.payload.text}`)
-      .join("\n\n");
+    const { codeResults, textResults } = await searchEmbeddings(queryEmbedding);
+    const context = [
+      ...codeResults.map(
+        (result, index) => `(${index + 1}) ${result.payload.text}`
+      ),
+      ...textResults.map(
+        (result, index) => `(${index + 1}) ${result.payload.text}`
+      )
+    ].join("\n\n");
 
     if (!context) {
       return res.json({ results: "No relevant information found." });
@@ -166,44 +174,81 @@ app.post("/search", async (req, res) => {
   }
 });
 
-async function* generateReadableResponse(userQuery, searchResults) {
-  console.log("Generating response...");
+app.post("/store-code-snippet", async (req, res) => {
+  const { code, metadata } = req.body;
+
+  if (!code) {
+    return res.status(400).json({ error: "Code snippet is required" });
+  }
+
   try {
-    let context = searchResults
-      ?.map((result, index) => `(${index + 1}) ${result.payload.text}`)
-      .join("\n\n");
+    const point = await storeCodeSnippets(code, metadata);
+    res.json({ message: "Code snippet stored successfully", id: point.id });
+  } catch (error) {
+    console.error("Error storing code snippet:", error.message);
+    res.status(500).json({ error: "Failed to store code snippet" });
+  }
+});
 
-    /* if (!context) {
-      return "I don't have enough information to answer this.";
-    } */
+async function* generateReadableResponse(
+  userQuery,
+  codeResults = [],
+  textResults = []
+) {
+  console.log("Generating response...");
 
-    console.log(context, "context");
+  try {
+    // Prioritize top 5 code and top 5 text blocks
+    const codeChunks = codeResults
+      .slice(0, 5)
+      .map((res, i) => `💻 Code (${i + 1}):\n${res.payload.text}`);
+
+    const textChunks = textResults
+      .slice(0, 5)
+      .map((res, i) => `📝 Text (${i + 1}):\n${res.payload.text}`);
+
+    const contextChunks = [...codeChunks, ...textChunks];
+    const context = contextChunks.join("\n\n");
+
+    if (!context.trim()) {
+      yield "⚠️ I don’t have enough information to answer that.";
+      return;
+    }
+
+    console.log("Prepared context:\n", context);
 
     const ollamaResponse = await ollama.generate(
       {
         model: "deepseek-coder-v2",
         system: SYSTEM_PROMPT,
-        prompt: `User Query: ${userQuery}\n\nRetrieved Data:\n${context}\n\nAssistant:`,
+        prompt: `User Query: ${userQuery}
+
+Use only the context below to answer the user's question.
+Format any code using triple backticks (\`\`\`js):
+
+${context}
+
+Assistant:`,
         stream: true
       },
-      { responseType: "stream" } // Enable streaming response
+      { responseType: "stream" }
     );
-
-    //const ollamaResponse = await deepseekSearch(SYSTEM_PROMPT, context);
-
-    console.log("Ollama response:", ollamaResponse);
 
     let fullResponse = "";
     for await (const part of ollamaResponse) {
+      const escapedResponse = escapeHtml(part.response);
       console.log("Response chunk:", part.response);
-      fullResponse += part.response;
-      yield part.response;
+      fullResponse += escapedResponse;
+      yield escapedResponse;
+
       if (part.done && part.done_reason === "stop") break;
     }
-
-    // return fullResponse;
   } catch (error) {
-    console.error("Error generating AI response:", error.message);
-    throw new Error("Failed to generate response.");
+    console.error("❌ Error generating AI response:", error.message);
+    yield "⚠️ Sorry, something went wrong while generating a response.";
   }
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

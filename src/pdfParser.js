@@ -6,9 +6,21 @@ const { encoding_for_model } = require("tiktoken");
 
 function createTextChunks(text, maxTokens = 256) {
   const encoder = encoding_for_model("gpt-4");
-  const tokens = encoder.encode(text);
-  let chunks = [];
+  const codeBlockRegex = /```[\s\S]*?```/g;
 
+  // Extract code blocks first
+  const codeBlocks = text.match(codeBlockRegex) || [];
+  const remainingText = text.replace(codeBlockRegex, "");
+
+  const chunks = [];
+
+  // First add code blocks directly as individual chunks
+  for (const block of codeBlocks) {
+    chunks.push(block);
+  }
+
+  // Then chunk the remaining prose by token size
+  const tokens = encoder.encode(remainingText);
   for (let i = 0; i < tokens.length; i += maxTokens) {
     const chunkTokens = tokens.slice(i, i + maxTokens);
     const chunkText = encoder.decode(chunkTokens);
