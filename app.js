@@ -1,16 +1,19 @@
 const { default: ollama } = require("ollama");
 const express = require("express");
-const axios = require("axios");
 const path = require("path");
 const app = express();
 const multer = require("multer");
-const { extractAndChunkPDF, extractTextFromImages } = require("./pdfParser");
+const {
+  extractAndChunkPDF,
+  extractTextFromImages
+} = require("./src/pdfParser");
 const {
   storeEmbeddings,
   searchEmbeddings,
   storeChunksInQdrant
-} = require("./dbconnect");
-const { generateEmbeddings } = require("./embeddings");
+} = require("./src/dbconnect");
+const { generateEmbeddings } = require("./src/embeddings");
+// const deepseekSearch = require("./src/modelHandler");
 
 app.use(express.json());
 const upload = multer({ storage: multer.memoryStorage() });
@@ -19,9 +22,17 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.use(express.static(path.join(__dirname, "public")));
 
 // System Prompt (for better response guidance)
-const SYSTEM_PROMPT = `You are an AI assistant restricted to using only the provided context to generate responses. 
-Do not include any information that is not found in the retrieved context. If the context is insufficient, 
-respond with 'I don't have enough information to answer this.'`;
+/* const SYSTEM_PROMPT = `You are an AI assistant restricted to using only the provided context to generate responses. 
+Do not include any information that is not found in the retrieved context. If the context is insufficient or if you have received no or empty context, 
+respond with 'I don't have enough information to answer this.'`; */
+
+const SYSTEM_PROMPT = `You are an AI assistant that only provides answers based on retrieved data from the database. 
+You must strictly follow these rules:
+1. Only use the provided database data to generate responses. If no relevant data is retrieved, respond with: "I don’t have enough information to answer that."
+2. Do not use your own knowledge or make assumptions.
+3. Do not generate responses based on external world knowledge, prior training, or common sense reasoning.
+4. If the retrieved data is unclear or ambiguous, state that explicitly and ask for clarification if necessary.
+5. Keep responses factual, concise, and directly based on the retrieved data.`;
 
 // Start Server
 const PORT = 3000;
@@ -81,8 +92,8 @@ app.post("/file-upload", upload.single("file"), async (req, res) => {
     console.log("File uploaded: ", file.originalname);
     const chunks = await extractAndChunkPDF(file.buffer);
 
-    // const text = await extractTextFromImages(file.buffer);
-    console.log(text, "text from images");
+    /* const text = await extractTextFromImages(file.buffer);
+    console.log(text, "text from images"); */
     res.write("✅ PDF chunks stored successfully.\n");
     await storeChunksInQdrant(chunks, file.originalname);
     res.write("✅ PDF embeddings stored successfully.\n");
@@ -94,10 +105,8 @@ app.post("/file-upload", upload.single("file"), async (req, res) => {
 // ---------------------------------
 app.get("/history", async (req, res) => {
   try {
-    /* const result = await pool.query(
-      "SELECT * FROM chat_history ORDER BY created_at DESC"
-    ); */
-    res.json(result.rows);
+    //TODO: Implement a function to retrieve chat history from the database
+    res.json({ history: "Chat history retrieved successfully" });
   } catch (error) {
     console.error("Error fetching history:", error.message);
     res.status(500).json({ error: "Failed to retrieve chat history" });
@@ -136,29 +145,21 @@ app.post("/search", async (req, res) => {
   }
 
   try {
-    // Get embedding for search query
-    const embedResponse = await axios.post(
-      "http://localhost:11434/api/embeddings",
-      {
-        model: "mxbai-embed-large",
-        prompt: query
-      }
-    );
+    const embedResponse = await generateEmbeddings(query);
 
     const queryEmbedding = embedResponse.data.embedding;
 
-    // Search for similar vectors using cosine similarity
-    /* const result = await pool.query(
-      `
-      SELECT content, embedding <-> $1 AS similarity
-      FROM ojetgpt_vector
-      ORDER BY similarity ASC
-      LIMIT 5
-      `,
-      [queryEmbedding]
-    ); */
+    // Search for similar embeddings
+    const searchResults = await searchEmbeddings(queryEmbedding);
+    const context = searchResults
+      ?.map((result, index) => `(${index + 1}) ${result.payload.text}`)
+      .join("\n\n");
 
-    res.json({ results: result.rows });
+    if (!context) {
+      return res.json({ results: "No relevant information found." });
+    }
+
+    res.json({ results: context });
   } catch (error) {
     console.error("Error performing search:", error.message);
     res.status(500).json({ error: "Failed to retrieve results" });
@@ -166,25 +167,31 @@ app.post("/search", async (req, res) => {
 });
 
 async function* generateReadableResponse(userQuery, searchResults) {
+  console.log("Generating response...");
   try {
     let context = searchResults
       ?.map((result, index) => `(${index + 1}) ${result.payload.text}`)
       .join("\n\n");
 
-    if (!context) {
+    /* if (!context) {
       return "I don't have enough information to answer this.";
-    }
+    } */
 
     console.log(context, "context");
 
     const ollamaResponse = await ollama.generate(
       {
         model: "deepseek-coder-v2",
-        prompt: `${SYSTEM_PROMPT}\nUser Query: ${userQuery}\n\nRelevant Information:\n${context}\n\nAssistant:`,
+        system: SYSTEM_PROMPT,
+        prompt: `User Query: ${userQuery}\n\nRetrieved Data:\n${context}\n\nAssistant:`,
         stream: true
       },
       { responseType: "stream" } // Enable streaming response
     );
+
+    //const ollamaResponse = await deepseekSearch(SYSTEM_PROMPT, context);
+
+    console.log("Ollama response:", ollamaResponse);
 
     let fullResponse = "";
     for await (const part of ollamaResponse) {
