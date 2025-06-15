@@ -14,6 +14,7 @@ const {
   storeCodeSnippets
 } = require("./src/dbconnect");
 const { generateEmbeddings } = require("./src/embeddings");
+const {searchWithLocalModel} = require("./src/modelHandler")
 // const deepseekSearch = require("./src/modelHandler");
 
 app.use(express.json());
@@ -217,22 +218,7 @@ async function* generateReadableResponse(
 
     console.log("Prepared context:\n", context);
 
-    const ollamaResponse = await ollama.generate(
-      {
-        model: "deepseek-coder-v2",
-        system: SYSTEM_PROMPT,
-        prompt: `User Query: ${userQuery}
-
-Use only the context below to answer the user's question.
-Format any code using triple backticks (\`\`\`js):
-
-${context}
-
-Assistant:`,
-        stream: true
-      },
-      { responseType: "stream" }
-    );
+    const ollamaResponse = await searchWithLocalModel(SYSTEM_PROMPT, userQuery, context)
 
     let fullResponse = "";
     for await (const part of ollamaResponse) {
@@ -252,3 +238,10 @@ Assistant:`,
 function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+
+/*TODO: Design and scaffolding of C1 codebase
+0. Create design document 
+1. MVVM to Preact conversion of any component
+2. addkittodialog component conversion
+*/

@@ -1,4 +1,5 @@
 const OpenAI = require("openai");
+const { default: ollama } = require("ollama");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 require("dotenv").config();
 
@@ -38,4 +39,23 @@ async function deepseekSearch(system_prompt, query) {
   }
 }
 
-module.exports = deepseekSearch;
+async function searchWithLocalModel(SYSTEM_PROMPT, userQuery, context) {
+  return await ollama.generate(
+    {
+      model: "deepseek-coder-v2:16b",
+      system: SYSTEM_PROMPT,
+      prompt: `User Query: ${userQuery}
+
+Use only the context below to answer the user's question.
+Format any code using triple backticks (\`\`\`js):
+
+${context}
+
+Assistant:`,
+      stream: true
+    },
+    { responseType: "stream" }
+  );
+}
+
+module.exports = { deepseekSearch, searchWithLocalModel };
