@@ -87,6 +87,7 @@ async function storeChunksInQdrant(chunks, fileId) {
 async function storeCodeSnippets(code, metadata = {}) {
   try {
     const embedding = await generateEmbeddings(code);
+    console.log("Generated embedding for code snippet:", embedding);
     const point = {
       id: generateId(),
       vector: embedding,
@@ -96,6 +97,7 @@ async function storeCodeSnippets(code, metadata = {}) {
         type: "code"
       }
     };
+    console.log("Storing code snippet with ID:", point.id);
     await client.upsert("code_snippets", { points: [point] });
     console.log("✅ Code snippet stored successfully:", point.id);
     return point;

@@ -1,12 +1,8 @@
-const { default: ollama } = require("ollama");
 const express = require("express");
 const path = require("path");
 const app = express();
 const multer = require("multer");
-const {
-  extractAndChunkPDF,
-  extractTextFromImages
-} = require("./src/pdfParser");
+const { parseSourceFile, getFileType } = require("./src/sourceFileParser");
 const {
   storeEmbeddings,
   searchEmbeddings,
@@ -14,7 +10,7 @@ const {
   storeCodeSnippets
 } = require("./src/dbconnect");
 const { generateEmbeddings } = require("./src/embeddings");
-const {searchWithLocalModel} = require("./src/modelHandler")
+const { searchWithLocalModel } = require("./src/modelHandler");
 // const deepseekSearch = require("./src/modelHandler");
 
 app.use(express.json());
@@ -92,16 +88,52 @@ app.post("/file-upload", upload.single("file"), async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  if (file) {
-    console.log("File uploaded: ", file.originalname);
-    const chunks = await extractAndChunkPDF(file.buffer);
+  res.write(`📁 File uploaded: ${file.originalname}\n`);
+  const fileType = getFileType(file.originalname);
 
-    /* const text = await extractTextFromImages(file.buffer);
-    console.log(text, "text from images"); */
-    res.write("✅ PDF chunks stored successfully.\n");
-    await storeChunksInQdrant(chunks, file.originalname);
-    res.write("✅ PDF embeddings stored successfully.\n");
+  if (fileType === "unknown") {
+    return res.status(400).json({ error: "Unsupported file type" });
   }
+
+  let parsedChunks;
+  try {
+    parsedChunks = await parseSourceFile(file.buffer, file.originalname);
+    console.log("Parsed chunks:", parsedChunks);
+    if (parsedChunks.length === 0) {
+      return res.status(400).json({ error: "No valid chunks found." });
+    }
+  } catch (error) {
+    console.error("Failed to parse source file:", error.message);
+    return res.status(500).json({ error: "Failed to parse file." });
+  }
+
+  const codeChunks = parsedChunks
+    .filter(c => c.type === "code")
+    .map(c => c.code)
+    .join("");
+
+  const textChunks = parsedChunks
+    .filter(c => c.type !== "code")
+    .map(c => c.code)
+    .join("");
+
+  if (codeChunks.length > 0) {
+    const metadata = {
+      language: "jsx",
+      framework: "oraclejet",
+      tags: ["oraclejet", "dialog", "vdom", "preact"],
+      filename: file.originalname
+    };
+    console.log("Storing code chunks:", codeChunks);
+    await storeCodeSnippets(codeChunks, metadata);
+    res.write("✅ Code chunks stored in code_snippets collection.\n");
+  }
+
+  if (textChunks.length > 0) {
+    await storeChunksInQdrant(textChunks, file.originalname);
+    res.write("✅ Text chunks stored in data_history collection.\n");
+  }
+  res.end();
 });
 
 // ---------------------------------
@@ -186,7 +218,7 @@ app.post("/store-code-snippet", async (req, res) => {
     const point = await storeCodeSnippets(code, metadata);
     res.json({ message: "Code snippet stored successfully", id: point.id });
   } catch (error) {
-    console.error("Error storing code snippet:", error.message);
+    console.error("Failed to store code snippet:", error.message);
     res.status(500).json({ error: "Failed to store code snippet" });
   }
 });
@@ -218,7 +250,11 @@ async function* generateReadableResponse(
 
     console.log("Prepared context:\n", context);
 
-    const ollamaResponse = await searchWithLocalModel(SYSTEM_PROMPT, userQuery, context)
+    const ollamaResponse = await searchWithLocalModel(
+      SYSTEM_PROMPT,
+      userQuery,
+      context
+    );
 
     let fullResponse = "";
     for await (const part of ollamaResponse) {
@@ -238,7 +274,6 @@ async function* generateReadableResponse(
 function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-
 
 /*TODO: Design and scaffolding of C1 codebase
 0. Create design document 
