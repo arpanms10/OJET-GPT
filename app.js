@@ -7,7 +7,8 @@ const {
   storeEmbeddings,
   searchEmbeddings,
   storeChunksInQdrant,
-  storeCodeSnippets
+  storeCodeSnippets,
+  storeIntoVectorDB
 } = require("./src/dbconnect");
 const { generateEmbeddings } = require("./src/embeddings");
 const { searchWithLocalModel } = require("./src/modelHandler");
@@ -95,44 +96,20 @@ app.post("/file-upload", upload.single("file"), async (req, res) => {
     return res.status(400).json({ error: "Unsupported file type" });
   }
 
-  let parsedChunks;
+  let parsedData;
   try {
-    parsedChunks = await parseSourceFile(file.buffer, file.originalname);
-    console.log("Parsed chunks:", parsedChunks);
-    if (parsedChunks.length === 0) {
+    parsedData = await parseSourceFile(file.buffer, file.originalname);
+    console.log("Parsed chunks:", parsedData.parsedChunks);
+    if (parsedData.parsedChunks.length === 0) {
       return res.status(400).json({ error: "No valid chunks found." });
     }
   } catch (error) {
     console.error("Failed to parse source file:", error.message);
     return res.status(500).json({ error: "Failed to parse file." });
   }
-
-  const codeChunks = parsedChunks
-    .filter(c => c.type === "code")
-    .map(c => c.code)
-    .join("");
-
-  const textChunks = parsedChunks
-    .filter(c => c.type !== "code")
-    .map(c => c.code)
-    .join("");
-
-  if (codeChunks.length > 0) {
-    const metadata = {
-      language: "jsx",
-      framework: "oraclejet",
-      tags: ["oraclejet", "dialog", "vdom", "preact"],
-      filename: file.originalname
-    };
-    console.log("Storing code chunks:", codeChunks);
-    await storeCodeSnippets(codeChunks, metadata);
-    res.write("✅ Code chunks stored in code_snippets collection.\n");
-  }
-
-  if (textChunks.length > 0) {
-    await storeChunksInQdrant(textChunks, file.originalname);
-    res.write("✅ Text chunks stored in data_history collection.\n");
-  }
+  parsedData.file = file;
+  await storeIntoVectorDB(parsedData, file, res);
+  
   res.end();
 });
 
