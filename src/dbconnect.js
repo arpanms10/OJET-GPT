@@ -16,6 +16,17 @@ function generateId() {
   return uuidv4();
 }
 
+/**
+ * 
+ *Flow Recap in RAG
+🧾 You chunk your document into pieces of ~256 tokens (text chunks).
+
+🔄 Each chunk (not each token) is passed to the embedding model (e.g., mxbai-embed-large).
+
+📉 The embedding model turns the entire chunk into one fixed-length vector (e.g., a 1024-dimensional vector).
+
+🧠 That single vector is stored in Qdrant — associated with the original chunk of text.
+ */
 async function storeEmbeddings(response, text) {
   console.log(response);
   const id = generateId();
@@ -57,7 +68,7 @@ async function searchEmbeddings(queryVector, limit = 500) {
   }
 }
 
-async function storeChunksInQdrant(chunks, fileId) {
+async function storeChunksInQdrant(chunks, fileId, metadata, batchSize = 200) {
   let points = [];
   const decoder = new TextDecoder("utf-8");
 
@@ -72,15 +83,30 @@ async function storeChunksInQdrant(chunks, fileId) {
       payload: {
         fileId,
         chunkIndex: i,
-        text: isCodeBlock ? chunk : decoder.decode(chunk),
+        ...metadata,
+        // text: isCodeBlock ? chunk : decoder.decode(chunk),
+        text: chunk,
         type: isCodeBlock ? "code" : "text"
       }
     });
   }
 
   // Upsert to Qdrant
-  await client.upsert(TEXT_COLLECTION, { points });
-
+  // await client.upsert(TEXT_COLLECTION, { points });
+  console.log(`📦 Total points to insert: ${points.length}`);
+  for (let i = 0; i < points.length; i += batchSize) {
+    const batch = points.slice(i, i + batchSize);
+    try {
+      console.log(`🔄 Inserting batch: ${i} to ${i + batch.length - 1}`);
+      await client.upsert(TEXT_COLLECTION, {
+        wait: true,
+        points: batch,
+      });
+    } catch (err) {
+      console.error(`❌ Error inserting batch ${i}-${i + batch.length - 1}:`, err);
+      throw err;
+    }
+  }
   console.log(`✅ Stored ${chunks.length} chunks in Qdrant.`);
 }
 
@@ -106,9 +132,70 @@ async function storeCodeSnippets(code, metadata = {}) {
   }
 }
 
+async function storeIntoVectorDB({parsedChunks, fileType}, file, res){
+  if (fileType === 'pdf') {
+    const textChunks = parsedChunks
+      .filter(c => c.type !== "code")
+      .map(c => c.code)
+      .join("");
+    if (textChunks.length > 0) {
+      await storeChunksInQdrant(textChunks, file.originalname);
+      res.write("✅ Text chunks stored in data_history collection.\n");
+    }
+  } else if(fileType === 'javascript'){
+      const jsCodeChunks = parsedChunks
+        .filter(c => c.type === "code")
+        .map(c => c.code)
+        .join("");
+      if (jsCodeChunks.length > 0) {
+        const metadata = {
+          language: "jsx",
+          framework: "oraclejet",
+          tags: ["oraclejet", "dialog", "vdom", "preact", "MVVM", "xApp"],
+          filename: file.originalname
+        };
+        console.log("Storing code chunks:", jsCodeChunks);
+        await storeCodeSnippets(jsCodeChunks, metadata);
+        res.write("✅ Code chunks stored in code_snippets collection.\n");
+      }
+    } else if(fileType === 'html'){
+      const htmlCodeChunks = parsedChunks
+        .filter(c => c.type === "html" || c.type === "text")
+        .map(c => c.code)
+        .join("");
+      if (htmlCodeChunks.length > 0) {
+        const metadata = {
+          language: "HTML",
+          framework: "oraclejet",
+          tags: ["oraclejet", "dialog", "vdom", "preact", "MVVM", "xApp", "HTML"],
+          filename: file.originalname
+        };
+        console.log("Storing code chunks:", htmlCodeChunks);
+        await storeCodeSnippets(htmlCodeChunks, metadata);
+        res.write("✅ Code chunks stored in code_snippets collection.\n");
+      }
+    } else if (fileType === 'markdown'){
+      const mdChunks = parsedChunks.join("");
+      if (mdChunks.length > 0) {
+        const metadata = {
+          language: "markdown",
+          framework: "oraclejet",
+          tags: ["Low Level Desing", "LLD", "oraclejet", "dialog", "vdom", "preact", "MVVM", "xApp", "HTML"],
+          filename: file.originalname
+        };
+        console.log("Storing code chunks:", mdChunks);
+        await storeChunksInQdrant(mdChunks, file.originalname, metadata);
+        res.write("✅ LLD chunks stored in code_snippets collection.\n");
+      }
+    } else {
+
+    } 
+}
+
 module.exports = {
   storeEmbeddings,
   searchEmbeddings,
   storeChunksInQdrant,
-  storeCodeSnippets
+  storeCodeSnippets,
+  storeIntoVectorDB,
 };
