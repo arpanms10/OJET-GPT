@@ -68,7 +68,7 @@ app.post("/chat", async (req, res) => {
       console.log(queryVector, "queryVector");
       const inferredResponse = await inferSearchFiltersWithLLM(prompt);
       console.log(inferredResponse, "filters from LLM");
-      const filters = buildQdrantFilter(inferredResponse);
+      const filters = {}; //buildQdrantFilter(inferredResponse);
       console.log(filters, "filters for search");
       const { codeResults, textResults } = await searchEmbeddings(
         queryVector,

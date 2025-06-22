@@ -31,7 +31,7 @@ If any field is not clear, omit it. DO NOT explain anything. DO NOT return text 
 async function inferSearchFiltersWithLLM(userQuery) {
   try {
     const response = await ollama.chat({
-      model: "mistral",
+      model: "mistral:7b",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userQuery }
