@@ -12,6 +12,10 @@ const {
 } = require("./src/dbconnect");
 const { generateEmbeddings } = require("./src/embeddings");
 const { searchWithLocalModel } = require("./src/modelHandler");
+const {
+  inferSearchFiltersWithLLM,
+  buildQdrantFilter
+} = require("./src/inferFiltersFromQuery");
 // const deepseekSearch = require("./src/modelHandler");
 
 app.use(express.json());
@@ -25,14 +29,16 @@ app.use(express.static(path.join(__dirname, "public")));
 Do not include any information that is not found in the retrieved context. If the context is insufficient or if you have received no or empty context, 
 respond with 'I don't have enough information to answer this.'`; */
 
-const SYSTEM_PROMPT = `You are an AI assistant that only provides answers based on retrieved data from the database. 
-You must strictly follow these rules:
-1. Only use the provided database data to generate responses. If no relevant data is retrieved, respond with: "I don’t have enough information to answer that."
-2. Do not use your own knowledge or make assumptions.
-3. Do not generate responses based on external world knowledge, prior training, or common sense reasoning.
-4. If the retrieved data is unclear or ambiguous, state that explicitly and ask for clarification if necessary.
-5. Keep responses factual, concise, and directly based on the retrieved data.`;
+const SYSTEM_PROMPT = `You are an AI assistant that only provides answers based on retrieved data from the database.
 
+RULES:
+1. You must only use the provided retrieved data to generate responses. Do not use external knowledge.
+2. If no relevant data is retrieved, reply: "I don’t have enough information to answer that."
+3. Do not guess or make assumptions. Be literal and precise.
+4. If the retrieved data includes code, return the full code exactly as it appears, wrapped in triple backticks like \`\`\`js ... \`\`\`.
+5. Do not omit or truncate code. Always include the full retrieved code block if it directly answers the user question.
+6. Keep responses clear and based only on the content provided. Do not fabricate explanations.
+`;
 // Start Server
 const PORT = 3000;
 app.listen(PORT, () => {
@@ -60,7 +66,14 @@ app.post("/chat", async (req, res) => {
       res.write("💡 Processing user query...\n");
       const queryVector = await generateEmbeddings(prompt);
       console.log(queryVector, "queryVector");
-      const { codeResults, textResults } = await searchEmbeddings(queryVector);
+      const inferredResponse = await inferSearchFiltersWithLLM(prompt);
+      console.log(inferredResponse, "filters from LLM");
+      const filters = buildQdrantFilter(inferredResponse);
+      console.log(filters, "filters for search");
+      const { codeResults, textResults } = await searchEmbeddings(
+        queryVector,
+        filters
+      );
       console.log(codeResults.length, "codeResults");
       console.log(textResults.length, "textResults");
 
@@ -109,7 +122,7 @@ app.post("/file-upload", upload.single("file"), async (req, res) => {
   }
   parsedData.file = file;
   await storeIntoVectorDB(parsedData, file, res);
-  
+
   res.end();
 });
 

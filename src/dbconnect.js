@@ -44,7 +44,7 @@ async function storeEmbeddings(response, text) {
     });
 }
 
-async function searchEmbeddings(queryVector, limit = 500) {
+async function searchEmbeddings(queryVector, filters = {}, limit = 500) {
   try {
     const [textResults, codeResults] = await Promise.all([
       client.search(TEXT_COLLECTION, {
@@ -56,6 +56,7 @@ async function searchEmbeddings(queryVector, limit = 500) {
       client.search(CODE_COLLECTION, {
         vector: queryVector,
         limit,
+        filter: filters,
         with_vector: true,
         score_threshold: 0.7
       })
@@ -93,9 +94,9 @@ async function storeChunksInQdrant(chunks, fileId, metadata, batchSize = 200) {
   }
 
   // Upsert to Qdrant
-  
+
   console.log(`📦 Total points to insert: ${points.length}`);
-/*   for (let i = 0; i < points.length; i += batchSize) {
+  /*   for (let i = 0; i < points.length; i += batchSize) {
     const batch = points.slice(i, i + batchSize);
     try {
       console.log(`🔄 Inserting batch: ${i} to ${i + batch.length - 1}`);
@@ -134,63 +135,72 @@ async function storeCodeSnippets(code, metadata = {}) {
   }
 }
 
-async function storeIntoVectorDB({parsedChunks, fileType}, file, res){
-  if (fileType === 'pdf') {
+async function storeIntoVectorDB({ parsedChunks, fileType }, file, res) {
+  if (fileType === "pdf") {
     const textChunks = parsedChunks
       .filter(c => c.type === "text")
-      .map(c => c.code)
+      .map(c => c.code);
     if (textChunks.length > 0) {
       await storeChunksInQdrant(textChunks, file.originalname);
       res.write("✅ Text chunks stored in data_history collection.\n");
     }
-  } else if(fileType === 'javascript'){
-      const jsCodeChunks = parsedChunks
-        .filter(c => c.type === "code")
-        .map(c => c.code)
-        .join("");
-      if (jsCodeChunks.length > 0) {
-        const metadata = {
-          language: "jsx",
-          framework: "oraclejet",
-          tags: ["oraclejet", "dialog", "vdom", "preact", "MVVM", "xApp"],
-          filename: file.originalname
-        };
-        console.log("Storing code chunks:", jsCodeChunks);
-        await storeCodeSnippets(jsCodeChunks, metadata);
-        res.write("✅ Code chunks stored in code_snippets collection.\n");
-      }
-    } else if(fileType === 'html'){
-      const htmlCodeChunks = parsedChunks
-        .filter(c => c.type === "html" || c.type === "text")
-        .map(c => c.code)
-        .join("");
-      if (htmlCodeChunks.length > 0) {
-        const metadata = {
-          language: "HTML",
-          framework: "oraclejet",
-          tags: ["oraclejet", "dialog", "vdom", "preact", "MVVM", "xApp", "HTML"],
-          filename: file.originalname
-        };
-        console.log("Storing code chunks:", htmlCodeChunks);
-        await storeCodeSnippets(htmlCodeChunks, metadata);
-        res.write("✅ Code chunks stored in code_snippets collection.\n");
-      }
-    } else if (fileType === 'markdown'){
-      const mdChunks = parsedChunks.join("");
-      if (mdChunks.length > 0) {
-        const metadata = {
-          language: "markdown",
-          framework: "oraclejet",
-          tags: ["Low Level Design", "LLD", "oraclejet", "dialog", "vdom", "preact", "MVVM", "xApp", "HTML"],
-          filename: file.originalname
-        };
-        console.log("Storing code chunks:", mdChunks);
-        await storeCodeSnippets(mdChunks, metadata);
-        res.write("✅ LLD chunks stored in code_snippets collection.\n");
-      }
-    } else {
-
-    } 
+  } else if (fileType === "javascript") {
+    const jsCodeChunks = parsedChunks
+      .filter(c => c.type === "code")
+      .map(c => c.code)
+      .join("");
+    if (jsCodeChunks.length > 0) {
+      const metadata = {
+        language: "jsx",
+        framework: "oraclejet",
+        tags: ["oraclejet", "dialog", "vdom", "preact", "MVVM", "xApp"],
+        filename: file.originalname
+      };
+      console.log("Storing code chunks:", jsCodeChunks);
+      await storeCodeSnippets(jsCodeChunks, metadata);
+      res.write("✅ Code chunks stored in code_snippets collection.\n");
+    }
+  } else if (fileType === "html") {
+    const htmlCodeChunks = parsedChunks
+      .filter(c => c.type === "html" || c.type === "text")
+      .map(c => c.code)
+      .join("");
+    if (htmlCodeChunks.length > 0) {
+      const metadata = {
+        language: "HTML",
+        framework: "oraclejet",
+        tags: ["oraclejet", "dialog", "vdom", "preact", "MVVM", "xApp", "HTML"],
+        filename: file.originalname
+      };
+      console.log("Storing code chunks:", htmlCodeChunks);
+      await storeCodeSnippets(htmlCodeChunks, metadata);
+      res.write("✅ Code chunks stored in code_snippets collection.\n");
+    }
+  } else if (fileType === "markdown") {
+    const mdChunks = parsedChunks.join("");
+    if (mdChunks.length > 0) {
+      const metadata = {
+        language: "markdown",
+        framework: "oraclejet",
+        tags: [
+          "Low Level Design",
+          "LLD",
+          "oraclejet",
+          "dialog",
+          "vdom",
+          "preact",
+          "MVVM",
+          "xApp",
+          "HTML"
+        ],
+        filename: file.originalname
+      };
+      console.log("Storing code chunks:", mdChunks);
+      await storeCodeSnippets(mdChunks, metadata);
+      res.write("✅ LLD chunks stored in code_snippets collection.\n");
+    }
+  } else {
+  }
 }
 
 module.exports = {
@@ -198,5 +208,5 @@ module.exports = {
   searchEmbeddings,
   storeChunksInQdrant,
   storeCodeSnippets,
-  storeIntoVectorDB,
+  storeIntoVectorDB
 };
